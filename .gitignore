@@ -1,0 +1,13 @@
+# Python Virtual Environments (like venv, hackrx_env, etc.)
+/venv/
+
+
+# Python cache files and logs
+_pycache_/
+*.pyc
+*.log
+
+# Secret environment variables - CRITICAL FOR SECURITY
+.env
+
+".env"
