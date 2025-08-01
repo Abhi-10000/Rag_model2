@@ -1,4 +1,4 @@
-# Start with a slightly more feature-complete base image than 'slim'
+# Start with the standard python:3.10 image which is a good base
 FROM python:3.10
 
 # Set working directory
@@ -13,9 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     # For the libgthread error and other common library needs
     libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
+    # --- THIS IS THE FIX for the libGL.so.1 error ---
+    libgl1-mesa-glx \
     # Cleanup
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
