@@ -1,40 +1,34 @@
-# Start with the standard python:3.10 image
+# Start with the standard python:3.10 image which is a good base
 FROM python:3.10
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install all necessary system dependencies for Unstructured and its sub-dependencies
+# This includes libraries for handling images, PDFs, and various text encodings.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+    # For Unstructured PDF parsing
     poppler-utils \
+    # For Tesseract OCR (images inside PDFs)
     tesseract-ocr \
+    # For the libgthread error and other common library needs
     libglib2.0-0 \
+    # --- THIS IS THE FIX for the libGL.so.1 error ---
     libgl1-mesa-glx \
+    # Cleanup
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Ollama
-RUN curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/bin/ollama && chmod +x /usr/bin/ollama
 
 # Copy and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# --- THIS IS THE KEY FIX ---
-# Start the Ollama server in the background, pull the model to bake it into the image,
-# and then stop the server. This happens only during the build process.
-RUN nohup /usr/bin/ollama serve & sleep 5 && /usr/bin/ollama pull llama3:8b && pkill ollama
-
 # Copy the rest of the application source code
 COPY . .
 
-# Expose the port for the FastAPI application
+# Set environment variable and expose port for the cloud environment
+ENV PORT=8080
 EXPOSE 8080
 
-# The entrypoint script is now much simpler
-COPY ./entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
-# The command to run when the container starts
-CMD ["/app/entrypoint.sh"]
+# The command to run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
