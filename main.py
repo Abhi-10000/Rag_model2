@@ -48,7 +48,7 @@ llm = None
 prompt = None
 # --- RATE LIMIT FIX: Create a semaphore to control concurrency ---
 # This will allow a maximum of 3 LLM calls to run at the same time.
-CONCURRENCY_LIMIT = 3
+CONCURRENCY_LIMIT = 8
 llm_semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
 @asynccontextmanager
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
     logging.info("Application startup: Initializing models...")
     model_name = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_function = HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": "cpu"})
-    llm = ChatGroq(model="llama3-70b-8192", temperature=0)
+    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 # A universal prompt designed to handle any document type by focusing on core principles
     template = """You are a highly intelligent and meticulous Universal Document Analysis Assistant. Your sole purpose is to answer a user's question based *only* on the provided context from a document. You must adhere to the following principles at all times:
 
