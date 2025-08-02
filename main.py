@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
     global embedding_function, llm, prompt
     logging.info("Application startup: Initializing models...")
     model_name = "sentence-transformers/all-MiniLM-L6-v2"
-    embedding_function = HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": "cpu"})
+    embedding_function = HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": "cuda"})
     
     # --- FINAL LLM CHANGE: Switched to self-hosted Ollama ---
     llm = ChatOllama(model="llama3:8b", temperature=0)
@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
 **Answer:**
 """
     prompt = ChatPromptTemplate.from_template(template)
-    logging.info("Models and prompt are ready.")
+    logging.info("Models and prompt are ready for gpu execution.")
     yield
     logging.info("Application shutdown.")
 

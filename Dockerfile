@@ -1,11 +1,13 @@
-# Start with a base image that has Python
-FROM python:3.10
+# Start with an official NVIDIA CUDA base image. This includes the necessary drivers.
+FROM nvidia/cuda:12.1.0-base-ubuntu22.04
 
 # Set environment variables to be non-interactive
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies, including curl for Ollama
+# Install Python, pip, and all other necessary system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.10 \
+    python3-pip \
     curl \
     poppler-utils \
     tesseract-ocr \
@@ -17,12 +19,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set working directory
 WORKDIR /app
 
-# Install Ollama
+# Install Ollama (it will automatically detect and use the GPU drivers)
 RUN curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/bin/ollama && chmod +x /usr/bin/ollama
 
 # Copy and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application source code
 COPY . .
@@ -30,9 +32,7 @@ COPY . .
 # Expose the port for the FastAPI application
 EXPOSE 8080
 
-# --- The Entrypoint Script ---
-# This script will start the Ollama server in the background, pull the model,
-# and then start our FastAPI application.
+# The entrypoint script will start Ollama and then the FastAPI app
 COPY ./entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
