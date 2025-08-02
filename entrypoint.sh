@@ -3,8 +3,14 @@
 # Start the Ollama server in the background
 /usr/bin/ollama serve &
 
-# Wait a few seconds for the server to be ready
-sleep 5
+# --- ROBUST HEALTH CHECK ---
+# Wait for the Ollama server to be up and running before proceeding.
+echo "Waiting for Ollama server to start..."
+while ! curl -s http://localhost:11434/ > /dev/null; do
+    echo "Ollama server not yet available, waiting..."
+    sleep 1
+done
+echo "Ollama server is up and running."
 
 # Pull the model (this will happen only once during the first startup)
 echo "Pulling the Ollama model (llama3:8b)..."
