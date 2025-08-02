@@ -1,23 +1,24 @@
-# Start with the standard python:3.10 image which is a good base
+# Start with a base image that has Python
 FROM python:3.10
+
+# Set environment variables to be non-interactive
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies, including curl for Ollama
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    poppler-utils \
+    tesseract-ocr \
+    libglib2.0-0 \
+    libgl1-mesa-glx \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Install all necessary system dependencies for Unstructured and its sub-dependencies
-# This includes libraries for handling images, PDFs, and various text encodings.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    # For Unstructured PDF parsing
-    poppler-utils \
-    # For Tesseract OCR (images inside PDFs)
-    tesseract-ocr \
-    # For the libgthread error and other common library needs
-    libglib2.0-0 \
-    # --- THIS IS THE FIX for the libGL.so.1 error ---
-    libgl1-mesa-glx \
-    # Cleanup
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install Ollama
+RUN curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/bin/ollama && chmod +x /usr/bin/ollama
 
 # Copy and install Python dependencies
 COPY requirements.txt .
@@ -26,9 +27,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application source code
 COPY . .
 
-# Set environment variable and expose port for the cloud environment
-ENV PORT=8080
+# Expose the port for the FastAPI application
 EXPOSE 8080
 
-# The command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# --- The Entrypoint Script ---
+# This script will start the Ollama server in the background, pull the model,
+# and then start our FastAPI application.
+COPY ./entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# The command to run when the container starts
+CMD ["/app/entrypoint.sh"]

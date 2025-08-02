@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 # --- LangChain Imports ---
 from langchain_community.document_loaders import UnstructuredFileLoader
+from langchain_ollama.chat_models import ChatOllama
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
@@ -57,7 +58,9 @@ async def lifespan(app: FastAPI):
     logging.info("Application startup: Initializing models...")
     model_name = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_function = HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": "cpu"})
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+    
+    # --- FINAL LLM CHANGE: Switched to self-hosted Ollama ---
+    llm = ChatOllama(model="llama3:8b", temperature=0)
 # A universal prompt designed to handle any document type by focusing on core principles
     template = """You are a highly intelligent and meticulous Universal Document Analysis Assistant. Your sole purpose is to answer a user's question based *only* on the provided context from a document. You must adhere to the following principles at all times:
 
