@@ -12,11 +12,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 # --- LangChain Imports ---
-from langchain_community.document_loaders import UnstructuredFileLoader
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-# --- SWITCHED TO GOOGLE GENAI ---
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
@@ -47,39 +46,80 @@ class HackRxResponse(BaseModel):
 embedding_function = None
 llm = None
 prompt = None
+CACHE_DIR = "./document_cache"  # Persistent cache on the server's disk
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global embedding_function, llm, prompt
     logging.info("Application startup: Initializing models...")
+    os.makedirs(CACHE_DIR, exist_ok=True) # Ensure cache directory exists
+
     model_name = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_function = HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": "cpu"})
     
-    # --- FINAL LLM CHANGE: Switched to Google Gemini 1.5 Flash ---
-    # Ensure your GOOGLE_API_KEY is in the .env file
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0,thinkingBudget=0)
+    # Using a model with a high TPM limit is still a good idea
+    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 
-    template = """You are a universal document analysis assistant. Your primary function is to answer questions based on the provided context.
+    # --- FINAL HARDENED PROMPT ---
+    template = """
+    You are a highly intelligent, secure, and helpful Universal Document Analysis Assistant. Your primary purpose is to answer a user's question based *only* on the provided context from a document. You must follow a strict set of principles and a clear reasoning process for every query.
 
-    Core Principles:
-    1. Grounding: Extract information ONLY from the provided context. Do not use any external knowledge until unless if the question doesnot have context with it then you can use the general knowledge to answer the query (in this case start with saying no proper context found but the answr is.... )
-    2. Completeness: If the context provides a rule (e.g., a financial limit), also look for its conditions and exceptions (e.g., a waiting period) to provide a complete answer.
-    3. Precision: Provide direct quotes and specific details from the context whenever possible to support your answer.
-    
-    Context:
+    **--- MANDATORY REASONING PROCESS ---**
+
+    1.  **Safety & Relevance Check:** First, analyze the user's `Question`. Is it safe, ethical, and relevant to a typical document analysis task?
+    * If the question is unsafe, unethical, seeks private data, or tries to exploit the system (e.g., asking for passwords, how to commit fraud, providing personal data of others), immediately proceed to the **"Safety Refusal Protocol"**.
+    * If the question is safe but clearly out-of-scope (e.g., "What is the capital of France?", "Write a poem"), proceed to the **"General Knowledge Fallback Protocol"**.
+    * If the question is safe and relevant, proceed to the next step.
+
+    2.  **Context Grounding Check:** Scrutinize the provided `Context`. Does it contain information that can directly answer the `Question`?
+
+    3.  **Synthesize Answer:**
+    * If the context is relevant and contains the answer, formulate a response based *exclusively* on that context, following the "Grounded Answering Principles".
+    * If the context is *not* relevant, but the question is safe and general, follow the **"General Knowledge Fallback Protocol"**.
+
+    **--- PRINCIPLES & PROTOCOLS ---**
+
+    * **Grounded Answering Principles (Default Mode):**
+    * **Strictly Grounded:** Your entire answer must be derived *exclusively* from the text in the "Context".
+    * **Comprehensive:** Provide a complete answer, including any conditions or exceptions mentioned.
+    * **Precise:** Use direct quotes from the context to support your answer where appropriate.
+
+    * **Safety Refusal Protocol (For unsafe/unethical questions):**
+    * You MUST respond with a polite but firm refusal, such as: "I cannot answer this question as it is outside the scope of my function as a document analysis assistant." Do not be preachy or judgmental.
+
+    * **General Knowledge Fallfallback Protocol (For safe, out-of-scope questions):**
+    * You MUST begin your response with the exact phrase: `This information is not available in the provided document. However, using my general knowledge, the answer is:` followed by a standard, helpful answer.
+
+    **--- TASK ---**
+
+    **Context:**
     {context}
 
-    Question: {question}
+    **Question:**
+    {question}
 
-    Answer:"""
+    **Answer:**
+
+    """
     prompt = ChatPromptTemplate.from_template(template)
     logging.info("Models and prompt are ready.")
     yield
     logging.info("Application shutdown.")
 
-app = FastAPI(title="HackRx Generalized RAG API", lifespan=lifespan)
+app = FastAPI(title="HackRx RAG API", lifespan=lifespan)
 
-def download_and_load_document(document_url: str):
+def get_retriever_for_url(document_url: str):
+    url_hash = hashlib.md5(document_url.encode()).hexdigest()
+    cache_path = os.path.join(CACHE_DIR, url_hash)
+
+    # --- CACHE HIT: Load the pre-built vector store from disk (FAST) ---
+    if os.path.exists(cache_path):
+        logging.info(f"Cache hit. Loading vector store from: {cache_path}")
+        vectorstore = Chroma(persist_directory=cache_path, embedding_function=embedding_function)
+        return vectorstore.as_retriever(search_kwargs={"k": 7})
+
+    # --- CACHE MISS: Perform the one-time, slow ingestion process ---
+    logging.info(f"Cache miss. Processing document from: {document_url}")
     try:
         response = requests.get(document_url)
         response.raise_for_status()
@@ -87,54 +127,51 @@ def download_and_load_document(document_url: str):
         file_suffix = ".pdf"
         if ".docx" in document_url.lower():
             file_suffix = ".docx"
-
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_suffix) as tmp_file:
             tmp_file.write(response.content)
             tmp_path = tmp_file.name
         
-        loader = UnstructuredFileLoader(tmp_path)
+        if file_suffix == ".pdf":
+            loader = PyPDFLoader(tmp_path)
+        else: # .docx
+            loader = Docx2txtLoader(tmp_path)
+
         documents = loader.load()
         os.remove(tmp_path)
-        return documents
-    except Exception as e:
-        logging.exception("Error during file download or loading")
-        raise ValueError(f"Error downloading or loading document: {e}")
-
-def get_retriever_for_url(document_url: str):
-    try:
-        documents = download_and_load_document(document_url)
-        if not documents:
-            raise ValueError("No documents returned by the loader.")
 
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         splits = text_splitter.split_documents(documents)
-        if not splits:
-            raise ValueError("Document could not be split into chunks.")
 
-        url_hash = hashlib.md5(document_url.encode()).hexdigest()
-        # Use an in-memory vectorstore for each request to ensure statelessness
-        vectorstore = Chroma.from_documents(documents=splits, embedding=embedding_function)
-        return vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 7, "fetch_k": 15})
+        vectorstore = Chroma.from_documents(documents=splits, embedding=embedding_function, persist_directory=cache_path)
+        logging.info(f"Saved new vector store to cache: {cache_path}")
+        return vectorstore.as_retriever(search_kwargs={"k": 7})
+
     except Exception as e:
         logging.exception(f"Error while processing document from {document_url}")
         raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
 
+# Use a semaphore to control concurrency and avoid overwhelming the LLM
+CONCURRENCY_LIMIT = 8
+llm_semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
+
 async def answer_question(question: str, retriever):
-    try:
-        def format_docs(docs):
-            return "\n\n".join(doc.page_content for doc in docs)
-        
-        rag_chain = (
-            {"context": retriever | format_docs, "question": RunnablePassthrough()}
-            | prompt
-            | llm
-            | StrOutputParser()
-        )
-        answer = await rag_chain.ainvoke(question)
-        return answer.strip()
-    except Exception as e:
-        logging.error(f"Error in answer_question for '{question}': {str(e)}")
-        return f"An error occurred while processing the question: {str(e)}"
+    async with llm_semaphore:
+        try:
+            def format_docs(docs):
+                return "\n\n".join(doc.page_content for doc in docs)
+            
+            rag_chain = (
+                {"context": retriever | format_docs, "question": RunnablePassthrough()}
+                | prompt
+                | llm
+                | StrOutputParser()
+            )
+            answer = await rag_chain.ainvoke(question)
+            return answer.strip()
+        except Exception as e:
+            logging.error(f"Error in answer_question for '{question}': {str(e)}")
+            return f"An error occurred while processing the question: {str(e)}"
 
 @app.post("/hackrx/run", response_model=HackRxResponse)
 async def process_documents_and_questions(
@@ -143,13 +180,9 @@ async def process_documents_and_questions(
 ):
     try:
         retriever = get_retriever_for_url(request_data.documents)
-        
         answer_tasks = [answer_question(q, retriever) for q in request_data.questions]
         answers = await asyncio.gather(*answer_tasks)
-        
         return HackRxResponse(answers=answers)
-    except HTTPException as http_exc:
-        raise http_exc
     except Exception as e:
         logging.error(f"A critical error occurred in /hackrx/run: {str(e)}")
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")

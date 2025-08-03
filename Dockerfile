@@ -1,23 +1,11 @@
-# Start with the standard python:3.10 image which is a good base
+# Start with the standard, clean python:3.10 image
 FROM python:3.10
 
 # Set working directory
 WORKDIR /app
 
-# Install all necessary system dependencies for Unstructured and its sub-dependencies
-# This includes libraries for handling images, PDFs, and various text encodings.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    # For Unstructured PDF parsing
-    poppler-utils \
-    # For Tesseract OCR (images inside PDFs)
-    tesseract-ocr \
-    # For the libgthread error and other common library needs
-    libglib2.0-0 \
-    # --- THIS IS THE FIX for the libGL.so.1 error ---
-    libgl1-mesa-glx \
-    # Cleanup
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# The only system dependency we might need is for python-docx, but it's
+# usually handled by the Python package itself. This is a clean base.
 
 # Copy and install Python dependencies
 COPY requirements.txt .
