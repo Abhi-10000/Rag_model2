@@ -11,11 +11,10 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-# --- LangChain Imports ---
+# --- LangChain Imports (Using reliable loaders) ---
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-# --- SWITCHED TO GOOGLE GENAI ---
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -53,11 +52,15 @@ CACHE_DIR = "./document_cache"  # Persistent cache on the server's disk
 async def lifespan(app: FastAPI):
     global embedding_function, llm, prompt
     logging.info("Application startup: Initializing models...")
-    os.makedirs(CACHE_DIR, exist_ok=True) # Ensure cache directory exists
+    os.makedirs(CACHE_DIR, exist_ok=True)
 
     model_name = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_function = HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": "cpu"})
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0,thinkingBudget=0)
+    
+    # Use the standard, powerful Gemini 1.5 Flash model
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0, thinkingBudget=0)
+
+    # Your final, hardened prompt template
     template = """
     You are a highly intelligent, secure, and helpful Universal Document Analysis Assistant. Your primary purpose is to answer a user's question based *only* on the provided context from a document. You must follow a strict set of principles and a clear reasoning process for every query.
 
@@ -127,6 +130,7 @@ def get_retriever_for_url(document_url: str):
             tmp_file.write(response.content)
             tmp_path = tmp_file.name
         
+        # --- Using reliable, pure-python loaders ---
         if file_suffix == ".pdf":
             loader = PyPDFLoader(tmp_path)
         else: # .docx
@@ -146,7 +150,8 @@ def get_retriever_for_url(document_url: str):
         logging.exception(f"Error while processing document from {document_url}")
         raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
 
-CONCURRENCY_LIMIT = 8
+# Use a semaphore to gracefully handle concurrent requests
+CONCURRENCY_LIMIT = 15 # Gemini's free tier is generous, we can increase this
 llm_semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
 async def answer_question(question: str, retriever):
