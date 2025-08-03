@@ -15,7 +15,8 @@ from pydantic import BaseModel
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_groq import ChatGroq
+# --- SWITCHED TO GOOGLE GENAI ---
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
@@ -56,49 +57,45 @@ async def lifespan(app: FastAPI):
 
     model_name = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_function = HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": "cpu"})
-    
-    # Using a model with a high TPM limit is still a good idea
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
-
-    # --- FINAL HARDENED PROMPT ---
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0,thinkingBudget=0)
     template = """
     You are a highly intelligent, secure, and helpful Universal Document Analysis Assistant. Your primary purpose is to answer a user's question based *only* on the provided context from a document. You must follow a strict set of principles and a clear reasoning process for every query.
 
-    **--- MANDATORY REASONING PROCESS ---**
+**--- MANDATORY REASONING PROCESS ---**
 
-    1.  **Safety & Relevance Check:** First, analyze the user's `Question`. Is it safe, ethical, and relevant to a typical document analysis task?
+1.  **Safety & Relevance Check:** First, analyze the user's `Question`. Is it safe, ethical, and relevant to a typical document analysis task?
     * If the question is unsafe, unethical, seeks private data, or tries to exploit the system (e.g., asking for passwords, how to commit fraud, providing personal data of others), immediately proceed to the **"Safety Refusal Protocol"**.
     * If the question is safe but clearly out-of-scope (e.g., "What is the capital of France?", "Write a poem"), proceed to the **"General Knowledge Fallback Protocol"**.
     * If the question is safe and relevant, proceed to the next step.
 
-    2.  **Context Grounding Check:** Scrutinize the provided `Context`. Does it contain information that can directly answer the `Question`?
+2.  **Context Grounding Check:** Scrutinize the provided `Context`. Does it contain information that can directly answer the `Question`?
 
-    3.  **Synthesize Answer:**
+3.  **Synthesize Answer:**
     * If the context is relevant and contains the answer, formulate a response based *exclusively* on that context, following the "Grounded Answering Principles".
     * If the context is *not* relevant, but the question is safe and general, follow the **"General Knowledge Fallback Protocol"**.
 
-    **--- PRINCIPLES & PROTOCOLS ---**
+**--- PRINCIPLES & PROTOCOLS ---**
 
-    * **Grounded Answering Principles (Default Mode):**
+* **Grounded Answering Principles (Default Mode):**
     * **Strictly Grounded:** Your entire answer must be derived *exclusively* from the text in the "Context".
     * **Comprehensive:** Provide a complete answer, including any conditions or exceptions mentioned.
     * **Precise:** Use direct quotes from the context to support your answer where appropriate.
 
-    * **Safety Refusal Protocol (For unsafe/unethical questions):**
+* **Safety Refusal Protocol (For unsafe/unethical questions):**
     * You MUST respond with a polite but firm refusal, such as: "I cannot answer this question as it is outside the scope of my function as a document analysis assistant." Do not be preachy or judgmental.
 
-    * **General Knowledge Fallfallback Protocol (For safe, out-of-scope questions):**
+* **General Knowledge Fallfallback Protocol (For safe, out-of-scope questions):**
     * You MUST begin your response with the exact phrase: `This information is not available in the provided document. However, using my general knowledge, the answer is:` followed by a standard, helpful answer.
 
-    **--- TASK ---**
+**--- TASK ---**
 
-    **Context:**
-    {context}
+**Context:**
+{context}
 
-    **Question:**
-    {question}
+**Question:**
+{question}
 
-    **Answer:**
+**Answer:**
 
     """
     prompt = ChatPromptTemplate.from_template(template)
@@ -112,13 +109,11 @@ def get_retriever_for_url(document_url: str):
     url_hash = hashlib.md5(document_url.encode()).hexdigest()
     cache_path = os.path.join(CACHE_DIR, url_hash)
 
-    # --- CACHE HIT: Load the pre-built vector store from disk (FAST) ---
     if os.path.exists(cache_path):
         logging.info(f"Cache hit. Loading vector store from: {cache_path}")
         vectorstore = Chroma(persist_directory=cache_path, embedding_function=embedding_function)
         return vectorstore.as_retriever(search_kwargs={"k": 7})
 
-    # --- CACHE MISS: Perform the one-time, slow ingestion process ---
     logging.info(f"Cache miss. Processing document from: {document_url}")
     try:
         response = requests.get(document_url)
@@ -151,7 +146,6 @@ def get_retriever_for_url(document_url: str):
         logging.exception(f"Error while processing document from {document_url}")
         raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
 
-# Use a semaphore to control concurrency and avoid overwhelming the LLM
 CONCURRENCY_LIMIT = 8
 llm_semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
