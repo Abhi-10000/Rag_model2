@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
     embedding_function = HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": "cpu"})
     
     # Use the standard, powerful Gemini 1.5 Flash model
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0, thinkingBudget=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
 
     # Your final, hardened prompt template
     template = """
